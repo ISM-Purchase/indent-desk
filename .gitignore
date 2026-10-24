@@ -5,3 +5,4 @@ tools/
 tests/
 Indent_Desk.html
 build-protected.cjs
+my-info.json
