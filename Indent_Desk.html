@@ -368,13 +368,16 @@ function need(f){
 function pendingByTab(f){
   const c={details:0,items:0,quotes:0};
   Object.keys(REQ).forEach(k=>{ if(missing(f,k)) c[k.startsWith("items.")?"items":k.startsWith("quotes")||k.startsWith("invites")||k==="quotesSigned"||k==="bidClose"?"quotes":"details"]++; });
-  const tt=total(f), LL=lim(f); if(f.mode!=="GeM"&&tt>LL.noQuote&&tt<=LL.dept&&f.deptRoute!=="LPC") c.quotes+=Math.max(0,4-(f.invites||[]).filter(v=>v.name&&v.email).length);
-  c.quotes+=Math.max(0,quotesNeeded(f).min-(f.quotes||[]).filter(q=>q.vendor&&q.vendor.trim()&&q.formalBid===true).length);
+  const tt=total(f), LL=lim(f); if(f.mode!=="GeM"&&tt>LL.noQuote&&tt<=LL.dept&&f.deptRoute!=="LPC") c.quotes+=Math.max(0,4-distinctBy((f.invites||[]).filter(v=>v.name&&v.email),v=>v.email));
+  c.quotes+=Math.max(0,quotesNeeded(f).min-distinctBy((f.quotes||[]).filter(q=>q.vendor&&q.vendor.trim()&&q.formalBid===true),q=>q.vendor));
   return c;
 }
 const star=k=>REQ[k]?`<b class="req" title="Required for this purchase">*</b>`:"";
 const why=k=>REQ[k]?`<small class="why" ${missing(cur(),k)?"":"hidden"}>Required for this purchase · ${esc(REQ[k])}</small>`:"";
 const missCls=k=>REQ[k]&&missing(cur(),k)?" miss":"";
+function fieldLabel(k){ const m=k.match(/^(items|quotes|invites)\.(\d+)\.(.+)$/); const w=x=>x.replace(/([A-Z])/g," $1").replace(/\./g," ").toLowerCase();
+  return m?`${{items:"item",quotes:"quotation",invites:"vendor"}[m[1]]} ${+m[2]+1} ${w(m[3])}`:w(k); }
+const distinctBy=(arr,key)=>new Set(arr.map(key).map(v=>String(v??"").trim().toLowerCase()).filter(Boolean)).size;
 function checks(f){
   const out=[], items=f.items||[], t=total(f), r=route(t,f), L=lim(f), gem=f.mode==="GeM", dl=deptLimit(f);
   const add=(state,text,rule,fix)=>out.push({state,text,rule,fix});
@@ -426,7 +429,7 @@ function checks(f){
   }
   const q=f.quotes||[];
   if(!gem && t>L.noQuote && t<=L.dept){
-    const nq=q.filter(x=>x.vendor&&x.formalBid===true).length;
+    const nq=distinctBy(q.filter(x=>x.vendor&&x.formalBid===true),x=>x.vendor);
     if(f.deptRoute==="LPC"){
       const lp=f.lpc||{}, n=[lp.m1,lp.m2,lp.m3].filter(x=>x&&x.trim()).length;
       if(n<3) add("bad","Local Purchase Committee of three members named","PM 4.2.1 · GFR 155","Three members of appropriate level, as decided by the HoD.");
@@ -436,7 +439,7 @@ function checks(f){
       if(!(f.surveyNote||"").trim()) add("warn","Record of the market survey behind the LPC certificate","PM 4.2.1-4.2.2 · GFR 155","Not a written rule, but it supports the 'prevailing market rate' certificate if Audit asks: note what the committee compared.");
       else add("ok","Market survey recorded","PM 4.2.1");
     } else {
-      const inv=(f.invites||[]).filter(v=>v.name&&v.email&&/@/.test(v.email)).length;
+      const inv=distinctBy((f.invites||[]).filter(v=>v.name&&v.email&&/@/.test(v.email)),v=>v.email);
       if(inv<4) add("bad",`${inv} vendor${inv===1?"":"s"} listed to invite on Abhikalp; more than three are required`,"PM 4.5.2","Add at least four vendors with working e-mail addresses on the Quotations tab, then enter them in Abhikalp.");
       else add("ok",`${inv} vendors listed to invite on Abhikalp`,"PM 4.5.2");
       if(nq<3) add("bad",`${nq} quotation${nq===1?"":"s"} recorded; e-mail bids need at least 3, asked from more than 3 firms`,"PM 4.5.2","Add the quotations, or switch to the LPC route if a market survey by a 3-member committee fits better.");
@@ -478,7 +481,8 @@ function checks(f){
     else add("warn",`${sc.label}: no manual states its Abhikalp fund source; “${sc.type}” is assumed`,"Budget mapping","Confirm with Accounts before submitting.");
     const pre=(f.portalRef||"").split("-")[0].toUpperCase(), pt=PREFIX_TYPE[pre];
     if(pt && pt!==sc.type) add(sc.type==="Institute"&&sc.verified?"bad":"warn",`Abhikalp ref ${f.portalRef} starts with ${pre} (fund source “${pt}”), but ${sc.label} is ${sc.type} funding.${pre==="OTH"&&sc.type==="Institute"?" With “Other”, Abhikalp sends the indent to the PI instead of the HoD, so the indenter approves it alone.":""}`,"Budget mapping · PM 5.1","Ask the Purchase Section to correct the fund source before IA and FC.");
-    if(sc.pcCap) items.filter(i=>isPC(i.name)).forEach(i=>{ const v=(+i.qty||0)*(+i.unitPrice||0); if(v>sc.pcCap) add("bad",`${i.name}: FRS allows at most Rs 1.5 lakh for one laptop, desktop, printer or scanner`,"R&D Manual 2.2(5)","Reduce the amount or fund the excess from another head."); else add("warn",`${i.name}: uses the single computing item FRS allows (one laptop/desktop/printer/scanner, max Rs 1.5 lakh)`,"R&D Manual 2.2(5)"); });
+    if(sc.pcCap){ const pcs=items.filter(i=>isPC(i.name)), units=pcs.reduce((a,i)=>a+(+i.qty>0?+i.qty:1),0); if(units>1) add("bad",`${units} computing items (${pcs.map(i=>i.name).join(", ")}): FRS allows only one laptop, desktop, printer or scanner in total, any one`,"FRS notification 1561/2023 cl. 5","Keep one computing item and fund the rest from another head."); }
+    if(sc.pcCap) items.filter(i=>isPC(i.name)).forEach(i=>{ const v=(+i.qty||0)*(+i.unitPrice||0); if(v>sc.pcCap) add("bad",`${i.name}: FRS allows at most Rs 1.5 lakh for one laptop, desktop, printer or scanner`,"FRS notification 1561/2023 cl. 5 · R&D Manual 2.2(5)","Reduce the amount or fund the excess from another head."); else add("warn",`${i.name}: uses the single computing item FRS allows (one laptop/desktop/printer/scanner, max Rs 1.5 lakh)`,"R&D Manual 2.2(5)"); });
     if(sc.noPC && items.some(i=>isPC(i.name))) add("bad","Workstations, PCs and peripherals are not allowed under the Advanced Lab grant","R&D Manual 2.3 Annex-I(e)","Fund these from another head.");
     if(sc.sanction && !f.sanctionAttached) add("bad",`Sanction letter for the ${sc.label} attached`,"Abhikalp Sec. 11 upload","Upload the sanction or allotment letter as the administrative approval.");
   }
@@ -487,6 +491,8 @@ function checks(f){
   if(!f.justification.trim()) add("warn","Justification for procurement written","Indent form, Sec. 11","One or two sentences on why the lab needs the item.");
   const open=(f.objections||[]).filter(o=>!o.resolved).length;
   if(open) add("bad",`${open} audit objection${open>1?"s":""} not yet answered`,"File noting","Answer each one on the Objections tab.");
+  const empty=Object.keys(need(f)).filter(k=>missing(f,k));
+  if(empty.length) add("bad",`${empty.length} required field${empty.length>1?"s":""} still empty: ${empty.slice(0,6).map(fieldLabel).join(", ")}${empty.length>6?", …":""}`,"Indent form · see each field","Fill the fields marked as required on the Details, Items & GeM and Quotations tabs.");
   return out;
 }
 function score(f){ const c=checks(f); const bad=c.filter(x=>x.state==="bad").length; return {c,bad,pct:Math.round(100*c.filter(x=>x.state==="ok").length/Math.max(1,c.length))}; }
@@ -565,7 +571,7 @@ ${parens([x.c.chair,x.c.m1,x.c.m2,f.indenter],["Chairman","Member","Member","Ind
 <p class="sm" style="text-align:center"><b>Format for Purchase above Rs.1,00,000 &amp; up to Rs. 10,00,000 under clause 4.2 (Non-GeM Purchase) / above Rs.2,00,000 &amp; up to Rs. 25,00,000 under clause 4(A) for scientific equipment and consumables for research purpose (Non-GeM Purchase)</b></p>
 <p>The Purchase Committee consisting of following members recommends the purchase of following items as per details below:</p>
 <table class="nb"><tr><td style="width:20%">Type of Goods</td><td>: &nbsp;${goodsLine(x)}</td></tr><tr><td>Name of the item</td><td>:${U(x.names,66)}</td></tr><tr><td>Name of the Seller</td><td>:${U(l1&&l1.vendor,66)}</td></tr>
-<tr><td>Unit Price</td><td>: Rs.${one?U(N(one.unitPrice),30):"_".repeat(30)} &nbsp;Quantity ${one?U(one.qty,24):"_".repeat(24)}</td></tr><tr><td>Total Cost</td><td>:${l1?U(N(l1.amount),50):x.t?U(N(x.t),50):"_".repeat(50)}(Qty. x Unit Price)</td></tr><tr><td>Source of Fund</td><td>${fundLine(f,x)}</td></tr></table>
+<tr><td>Unit Price</td><td>: Rs.${one?U(N(l1?Math.round(100*(+l1.amount)/(+one.qty||1))/100:one.unitPrice),30):"_".repeat(30)} &nbsp;Quantity ${one?U(one.qty,24):"_".repeat(24)}</td></tr><tr><td>Total Cost</td><td>:${l1?U(N(l1.amount),50):x.t?U(N(x.t),50):"_".repeat(50)}(Qty. x Unit Price)</td></tr><tr><td>Source of Fund</td><td>${fundLine(f,x)}</td></tr></table>
 <p style="margin-bottom:2px"><b><u>LPC Members:</u></b></p>
 <p>The LPC recommends to issue purchase order/supply order to M/s${DOT(l1&&l1.vendor,14)}.. Certified that the following members of the purchase committee are jointly and individually satisfied that the goods/services recommended for purchase are of the requisite specification and quality, priced at the prevailing market rate and the supplier recommended is reliable and competent to supply the goods/services in question and it is not debarred by Department of Commerce or Ministry/Department concerned or by IIT (ISM), Dhanbad.</p>
 <table><tr><td style="height:100px;vertical-align:bottom">${mem(lp.m1)}</td><td style="vertical-align:bottom">${mem(lp.m2)}</td><td style="vertical-align:bottom">${mem(lp.m3)}</td></tr></table>
@@ -627,14 +633,16 @@ ${R.map(([t,k])=>k===3?`<tr><td>${t}</td><td></td><td></td><td></td></tr>`:k===-
 
   rfq:{label:"Terms for vendors (attach to the bid)", make:f=>{ const x=fx(f), w=Math.max(0,...x.items.map(i=>+i.warrantyYears||0)), groups=new Map();
     x.items.forEach((i,n)=>{ const k=i.warrantyYears===0||i.warrantyYears==="0"?"not applicable":+i.warrantyYears>0?`${i.warrantyYears} year${+i.warrantyYears>1?"s":""}`:"______"; groups.set(k,[...(groups.get(k)||[]),n+1]); });
-    const quoted=x.items.some(i=>i.quoteWarranty===true), warranty=quoted?[...groups].map(([term,nums])=>`${term} for item${nums.length>1?"s":""} ${nums.join(", ")}`).join("; ")+". State the start date and service scope of the warranty in the quotation.":`${w?`at least ${w} year${w>1?"s":""}`:"______ years"}, comprehensive and on-site, from the date of installation. State the warranty period in the quotation.`;
+    const quoted=x.items.some(i=>i.quoteWarranty===true), na=i=>i.warrantyYears===0||i.warrantyYears==="0", terms=x.items.map((i,n)=>!na(i)&&String(i.warrantyTerms||"").trim()?`Item ${n+1}: ${String(i.warrantyTerms).trim()}`:"").filter(Boolean);
+    const periods=[...groups].map(([term,nums])=>`${quoted||term==="not applicable"||term==="______"?term:"at least "+term} for item${nums.length>1?"s":""} ${nums.join(", ")}`).join("; ");
+    const warranty=(groups.size===1&&!quoted?periods.replace(/ for items? [\d, ]+$/,""):periods)+(quoted?"":", from the date of installation")+". "+(terms.length?"Warranty terms: "+terms.join(" ")+" ":"")+(quoted?"State the start date and service scope of the warranty in the quotation.":"State the warranty period in the quotation.");
     return `<p style="text-align:center;margin:0"><b>Indian Institute of Technology (Indian School of Mines), Dhanbad</b><br>Department of ${esc(f.dept)}</p><h2>Specification and Terms for Quotation</h2><p>Quotations are invited through the Institute's Abhikalp portal for the items listed below.</p><table class="sm"><tr><th>Sl.</th><th>Item</th><th>Specification</th><th>Qty</th></tr>${x.items.map((i,n)=>`<tr><td>${n+1}</td><td>${esc(i.name)}</td><td style="white-space:pre-wrap">${esc(i.spec)}</td><td>${esc(i.qty)}</td></tr>`).join("")}</table>
     <p><b>Terms</b></p><ol><li>Any make meeting or exceeding the specification is acceptable. Quote make and model for each item, attach the datasheet, and give an item-wise compliance statement.</li><li>Warranty: ${esc(warranty)}</li><li>Prices in Indian Rupees, FOR IIT (ISM) Dhanbad, item-wise, with GST shown separately. Any item supplied free of cost must be stated as such.</li><li>Supply, installation and demonstration at IIT (ISM) Dhanbad.</li><li>State the delivery period and the validity of the offer (at least 90 days).</li><li>Valid GSTIN and PAN are required.</li><li>Upload the signed and stamped quotation through the Abhikalp link received by e-mail, by ${f.bidClose?esc(f.bidClose):"______________"}. Late quotations will not be considered.</li></ol>
     <p style="margin-top:24px">${esc(f.indenter)}<br>Department of ${esc(f.dept)}<br>IIT (ISM) Dhanbad</p>`; }},
 
   spec:{label:"Specification with warranty", make:f=>{ const yrs=y=>`${esc(y)} year${+y>1?"s":""}`;
     const w=i=>i.warrantyYears===0||i.warrantyYears==="0"?"Not applicable":+i.warrantyYears>0?`At least ${yrs(i.warrantyYears)} from installation`:"";
-    return head(f,"Technical Specification"+(f.budgetItem?": "+esc(f.budgetItem):"")) + `<table class="sm"><colgroup><col style="width:6%"><col style="width:20%"><col style="width:50%"><col style="width:17%"><col style="width:7%"></colgroup><tr><th>Sl.</th><th>Item</th><th>Specification</th><th>Warranty</th><th>Qty</th></tr>${(f.items||[]).map((i,n)=>`<tr><td>${n+1}</td><td>${esc(i.name)}</td><td style="white-space:pre-wrap">${esc(i.spec)}</td><td>${w(i)}</td><td>${esc(i.qty)}</td></tr>`).join("")}</table>` + sigBlock(f); }},
+    return head(f,"Technical Specification"+(f.budgetItem?": "+esc(f.budgetItem):"")) + `<table class="sm"><colgroup><col style="width:6%"><col style="width:20%"><col style="width:50%"><col style="width:17%"><col style="width:7%"></colgroup><tr><th>Sl.</th><th>Item</th><th>Specification</th><th>Warranty</th><th>Qty</th></tr>${(f.items||[]).map((i,n)=>`<tr><td>${n+1}</td><td>${esc(i.name)}</td><td style="white-space:pre-wrap">${esc(i.spec)}</td><td>${w(i)}${w(i)&&w(i)!=="Not applicable"&&String(i.warrantyTerms||"").trim()?"<br>"+esc(String(i.warrantyTerms).trim()):""}</td><td>${esc(i.qty)}</td></tr>`).join("")}</table>` + sigBlock(f); }},
   gem:{label:"GeM availability statement", make:f=>{ const items=f.items||[], verified=items.length>0&&items.every(i=>i.gemSearchedByName&&i.arptsId&&i.arptsDate)&&!!f.gemReport;
     return head(f,"GeM Availability Statement"+(f.budgetItem?": "+esc(f.budgetItem):"")) + `${verified?"<p>Each item was searched separately on the GeM portal using only the name of the item, and a separate Availability Report and Past Transaction Summary (ARPTS) was generated for each.</p>":""}<table><tr><th>Sl.</th><th>Item (search string)</th><th>ARPTS ID</th><th>Date</th><th>Suitable product on GeM</th><th>Remarks</th></tr>${items.map((i,n)=>`<tr><td>${n+1}</td><td>${esc(i.name)}</td><td>${esc(i.arptsId)}</td><td>${esc(i.arptsDate)}</td><td>${i.gemSearchedByName&&i.arptsId&&i.arptsDate?(i.gemAvailable==="yes"?"Available":i.gemAvailable==="no"?"Not available":"Not recorded"):""}</td><td>${esc(i.nonGemReason||"")}</td></tr>`).join("")}</table>${verified&&items.every(i=>i.arptsNotFound)?"<p>In each ARPTS the buyer has certified that no GeM category matching the item was found.</p>":""}${verified?"<p>The ARPTS for each item is attached as an annexure.</p>":""}` + sigBlock(f); }},
   cs:{label:"Comparative statement & recommendation", make:f=>{
@@ -842,7 +850,7 @@ function panePortal(f,p){
   add("Upload for administrative approval", sc&&sc.sanction?`${sc.label} sanction / allotment letter (PDF, under 2 MB)`:"Not needed for this fund source", {plain:true});
   add("12. Indigenous / imported", f.origin||"Indigenous", {plain:true});
   sec("After Save as Draft");
-  add("DPAC recommendation", t>L.noQuote?"Download it from the portal, get all four DPAC signatures, scan and upload":"Not needed at this value", {plain:true});
+  add("DPAC recommendation", t>(f.mode==="GeM"?GEM.direct:L.noQuote)?"Download it from the portal, get all four DPAC signatures, scan and upload":"Not needed at this value", {plain:true});
   if(f.research) add("Appendix-XVII", "Research-equipment undertaking, countersigned by HoD", {plain:true});
   if(f.mode==="Non-GeM") add("GeM Availability Report", "One signed report per item, searched by item name only", {plain:true});
   if(f.proprietary) add("Proprietary Article Certificate", "Appendix-XVIII, signed", {plain:true});
