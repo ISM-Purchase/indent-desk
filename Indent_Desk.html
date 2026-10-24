@@ -276,12 +276,13 @@ function blankIndent(){ return { estimate:"", gemStatus:"", title:"", portalRef:
 
 /* ---------- compliance engine ---------- */
 function items0(f){ return (f.items||[]).every(i=>i.name && i.spec); }
-function itemsTotal(f){ return (f.items||[]).reduce((s,i)=>s+(+i.qty||0)*(+i.unitPrice||0),0); }
+function itemsTotal(f){ return (f.items||[]).reduce((s,i)=>s+((+i.qty>0&&+i.unitPrice>0)?+i.qty*+i.unitPrice:0),0); }
+const formalQuote=q=>!!(q&&q.vendor&&String(q.vendor).trim()&&q.formalBid===true);
 function total(f){ return itemsTotal(f) || (+f.estimate||0); }
 function quoteComparison(f){
   const q=(f.quotes||[]).filter(x=>x.vendor && String(x.vendor).trim());
   const priced=x=>Number.isFinite(+x.amount) && +x.amount>0;
-  const sorted=q.filter(x=>x.formalBid!==false).sort((a,b)=>(priced(a)?+a.amount:Infinity)-(priced(b)?+b.amount:Infinity));
+  const sorted=q.filter(x=>x.formalBid===true).sort((a,b)=>(priced(a)?+a.amount:Infinity)-(priced(b)?+b.amount:Infinity));
   const tq=sorted.filter(x=>x.meetsSpec===true && priced(x));
   return {q,sorted,tq,l1:tq[0]};
 }
@@ -368,7 +369,7 @@ function pendingByTab(f){
   const c={details:0,items:0,quotes:0};
   Object.keys(REQ).forEach(k=>{ if(missing(f,k)) c[k.startsWith("items.")?"items":k.startsWith("quotes")||k.startsWith("invites")||k==="quotesSigned"||k==="bidClose"?"quotes":"details"]++; });
   const tt=total(f), LL=lim(f); if(f.mode!=="GeM"&&tt>LL.noQuote&&tt<=LL.dept&&f.deptRoute!=="LPC") c.quotes+=Math.max(0,4-(f.invites||[]).filter(v=>v.name&&v.email).length);
-  c.quotes+=Math.max(0,quotesNeeded(f).min-(f.quotes||[]).filter(q=>q.vendor&&q.vendor.trim()&&q.formalBid!==false).length);
+  c.quotes+=Math.max(0,quotesNeeded(f).min-(f.quotes||[]).filter(q=>q.vendor&&q.vendor.trim()&&q.formalBid===true).length);
   return c;
 }
 const star=k=>REQ[k]?`<b class="req" title="Required for this purchase">*</b>`:"";
@@ -425,7 +426,7 @@ function checks(f){
   }
   const q=f.quotes||[];
   if(!gem && t>L.noQuote && t<=L.dept){
-    const nq=q.filter(x=>x.vendor&&x.formalBid!==false).length;
+    const nq=q.filter(x=>x.vendor&&x.formalBid===true).length;
     if(f.deptRoute==="LPC"){
       const lp=f.lpc||{}, n=[lp.m1,lp.m2,lp.m3].filter(x=>x&&x.trim()).length;
       if(n<3) add("bad","Local Purchase Committee of three members named","PM 4.2.1 · GFR 155","Three members of appropriate level, as decided by the HoD.");
@@ -444,6 +445,7 @@ function checks(f){
   }
   if(!gem && t>L.noQuote) add(f.iaFc?"ok":"bad","Internal Audit clearance and Financial Concurrence obtained before purchase","PM 4.5.3, 5.3 · IAM Sec. 8","No post facto FC is given. Tick when both are on file.");
   if(gem && t>GEM.direct) add(f.iaFc?"ok":"bad","Financial Concurrence obtained before purchase (no pre-audit for GeM)","PM 5.3, 4.3","Tick when FC is on file.");
+  (f.items||[]).forEach((i,n)=>{ if(String(i.qty??"")!==""&&!(+i.qty>0)) add("bad",`Item ${n+1}${i.name?" ("+i.name+")":""}: quantity must be a number greater than zero`,"Indent form Sec. 9","Correct the quantity."); if(String(i.unitPrice??"")!==""&&!(+i.unitPrice>=0)) add("bad",`Item ${n+1}${i.name?" ("+i.name+")":""}: unit price cannot be negative`,"Indent form Sec. 9","Correct the price."); });
   const {q:namedQuotes,tq}=quoteComparison(f);
   if(namedQuotes.length){
     if(!tq.length) add("bad","No formally opened, technically compliant quotation has a valid positive amount","IAM Annex-I (7, 10, 11)","Record the committee's technical evaluation and a valid quoted amount. Preliminary and excluded quotations cannot be ranked or recommended.");
@@ -531,7 +533,7 @@ const DOCS = {
 <tr><td style="text-align:center"><b>${INSTt}</b></td></tr>
 <tr><td style="text-align:center"><b>Purchase Proposal Request Form</b></td></tr>
 <tr><td><b>Ref No.: ${U(f.portalRef,36)} &nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Indent Date : ${"_".repeat(13)}</b></td></tr>
-<tr><td><b>1. Indenter's Name:</b>${U(f.indenter,60)}<br><b>2. Department / Section:</b> ${U(f.dept,56)}<br><b>3. Department Indent No.:</b> ${"_".repeat(54)}<br><b>4. Quotation Attached (Yes/No)</b>${U(x.q.length?"Yes":"No",50)}</td></tr></table>
+<tr><td><b>1. Indenter's Name:</b>${U(f.indenter,60)}<br><b>2. Department / Section:</b> ${U(f.dept,56)}<br><b>3. Department Indent No.:</b> ${"_".repeat(54)}<br><b>4. Quotation Attached (Yes/No)</b>${U(x.q.some(formalQuote)?"Yes":"No",50)}</td></tr></table>
 <table><tr><td><b>5. Type of Item:</b><br>&nbsp;&nbsp;${CB(!x.ncs)} <i>Consumable</i> &nbsp; ${CB(x.ncs)} <i>Non-Consumable</i></td><td><b>6. Purchase Order Type</b><br>${CB(true)} <i>Normal</i> &nbsp;${CB(false)} <i>Repeat Order</i> &nbsp;${CB(false)} <i>Rate Contract</i></td></tr>
 <tr><td><b>7. Mode of Procurement: &nbsp;${CB(gem)} GeM &nbsp; ${CB(!gem)} Non-GeM</b></td><td><b>8. Item Category</b>${"_".repeat(26)}</td></tr></table>
 <table><tr><td><b>9. Details of Required Items.</b></td></tr></table><table class="sm"><colgroup><col style="width:6%"><col style="width:32%"><col style="width:10%"><col style="width:9%"><col style="width:9%"><col style="width:13%"><col style="width:10.5%"><col style="width:10.5%"></colgroup><tr><th>Sl. No.</th><th>Complete Description of Items (Specification Model, Catalogue No.) Use a separate sheet if required.</th><th>Stock Held as on date (Wherever applicable)</th><th>Quantity Required</th><th>Purpose</th><th>Method of Procurement [LPC/Bid at deptt. Level (clause 4.5) / Bid through P&amp;S Section)</th><th>Estimated Units Price</th><th>Total Estimated Cost</th></tr>
@@ -637,7 +639,7 @@ ${R.map(([t,k])=>k===3?`<tr><td>${t}</td><td></td><td></td><td></td></tr>`:k===-
     return head(f,"GeM Availability Statement"+(f.budgetItem?": "+esc(f.budgetItem):"")) + `${verified?"<p>Each item was searched separately on the GeM portal using only the name of the item, and a separate Availability Report and Past Transaction Summary (ARPTS) was generated for each.</p>":""}<table><tr><th>Sl.</th><th>Item (search string)</th><th>ARPTS ID</th><th>Date</th><th>Suitable product on GeM</th><th>Remarks</th></tr>${items.map((i,n)=>`<tr><td>${n+1}</td><td>${esc(i.name)}</td><td>${esc(i.arptsId)}</td><td>${esc(i.arptsDate)}</td><td>${i.gemSearchedByName&&i.arptsId&&i.arptsDate?(i.gemAvailable==="yes"?"Available":i.gemAvailable==="no"?"Not available":"Not recorded"):""}</td><td>${esc(i.nonGemReason||"")}</td></tr>`).join("")}</table>${verified&&items.every(i=>i.arptsNotFound)?"<p>In each ARPTS the buyer has certified that no GeM category matching the item was found.</p>":""}${verified?"<p>The ARPTS for each item is attached as an annexure.</p>":""}` + sigBlock(f); }},
   cs:{label:"Comparative statement & recommendation", make:f=>{
     const {q,tq,l1}=quoteComparison(f), r=route(total(f),f), excluded=q.filter(x=>!tq.includes(x));
-    const reason=x=>x.formalBid===false?"Preliminary quotation extract; formal bid opening and technical evaluation pending":x.meetsSpec!==true?(x.meetsSpec===false?"Does not meet the specification":"Technical compliance not recorded"):"Quoted amount missing or invalid";
+    const reason=x=>x.formalBid!==true?"Preliminary quotation extract; formal bid opening and technical evaluation pending":x.meetsSpec!==true?(x.meetsSpec===false?"Does not meet the specification":"Technical compliance not recorded"):"Quoted amount missing or invalid";
     const comparison=tq.length?`<table><tr><th>Rank</th><th>Supplier</th><th>Quoted amount (incl. taxes)</th><th>Warranty</th><th>Meets specification</th></tr>${tq.map((x,n)=>`<tr><td>L${n+1}</td><td>${esc(x.vendor)}</td><td>${inr(x.amount)}</td><td>${+x.warrantyYears>0?esc(x.warrantyYears)+" yr":""}</td><td>Yes</td></tr>`).join("")}</table>`:`<table><tr><th>Sl.</th><th>Bidder</th><th>Technically compliant (Yes/No)</th><th>Total price incl. GST (Rs.)</th><th>Rank</th></tr>${[1,2,3,4].map(n=>`<tr><td>${n}</td><td></td><td></td><td></td><td></td></tr>`).join("")}</table>`;
     const exclusions=excluded.length?`<h3>Quotations excluded from financial ranking</h3><table><tr><th>Supplier</th><th>Reason</th></tr>${excluded.map(x=>`<tr><td>${esc(x.vendor)}</td><td>${reason(x)}</td></tr>`).join("")}</table>`:"";
     const recommendation=l1?`<p>On the basis of technical and financial evaluation, the DPAC recommends the lowest-priced technically compliant bidder, <b>${esc(l1.vendor)}</b>, at ${inr(l1.amount)}.</p><p>Certified that we, the members of the Purchase Committee, are jointly and individually satisfied that the goods recommended for purchase are of the requisite specification and quality, priced at the prevailing market rate, and that the supplier recommended is reliable and competent to supply the goods in question, and it is not debarred by the Department of Commerce or the Ministry/Department concerned. (GFR 2017, Rule 155; IIT (ISM) Purchase Manual 4.5, Appendix-XIX)</p>`:`<p>Recommendation of the DPAC: ${"_".repeat(60)}</p>`;
@@ -671,7 +673,7 @@ function renderList(){
   const el=$("#list");
   if(!files.size){ el.innerHTML=`<p class="empty">No files yet. Create an indent to start; the checklist tells you what each file still needs.</p>`; return; }
   const arr=[...files.entries()].sort((a,b)=>(b[1].updatedAt||0)-(a[1].updatedAt||0));
-  el.innerHTML=arr.map(([id,f])=>{ const s=score(f); return `<button class="file" data-id="${id}" aria-current="${id===currentId}"><b>${esc(f.title||"Untitled indent")}</b><small>${esc(f.portalRef||"no portal ref")} · ${inr(total(f))}</small><span class="meter" title="${s.pct}% complete"><i style="width:${s.pct}%"></i></span><small>${s.bad?`${s.bad} item${s.bad>1?"s":""} pending`:"Ready to submit"}</small></button>`; }).join("");
+  el.innerHTML=arr.map(([id,f])=>{ const s=score(f); return `<button class="file" data-id="${esc(id)}" aria-current="${id===currentId}"><b>${esc(f.title||"Untitled indent")}</b><small>${esc(f.portalRef||"no portal ref")} · ${inr(total(f))}</small><span class="meter" title="${s.pct}% complete"><i style="width:${s.pct}%"></i></span><small>${s.bad?`${s.bad} item${s.bad>1?"s":""} pending`:"Ready to submit"}</small></button>`; }).join("");
   el.querySelectorAll(".file").forEach(b=>b.onclick=()=>{ $("#app").classList.remove("open"); currentId=b.dataset.id; pendingDelete=false; renderList(); renderMain(); });
 }
 function renderMain(){
@@ -741,14 +743,14 @@ function paneItems(f,p){
   p.querySelectorAll("[data-rm]").forEach(b=>b.onclick=()=>{ f.items.splice(+b.dataset.rm,1); save(); renderMain(); });
 }
 function paneQuotes(f,p){
-  const qn=quotesNeeded(f), have=(f.quotes||[]).filter(q=>q.vendor&&q.vendor.trim()&&q.formalBid!==false).length;
+  const qn=quotesNeeded(f), have=(f.quotes||[]).filter(q=>q.vendor&&q.vendor.trim()&&q.formalBid===true).length;
   p.innerHTML=`<div class="route"><small>Quotations for this purchase</small><b>${qn.min?`${have} of ${qn.min} required`:"No minimum"}</b><small>${esc(qn.text)}</small><div class="docrow">${docLinks([...routeDocs(f).filter(k=>k!=="apx12"),...(qn.min&&!REQ.quotesSigned?["cs"]:[])])}</div></div>`+
   (REQ.bidClose?`<fieldset><legend>Vendors to invite on Abhikalp</legend><p class="note">After the indent is approved, open Purchase History › Email on Abhikalp and enter these vendors and the closing date. Abhikalp e-mails each one an upload link; their sealed quotations open only after the closing date, with at least 3 received, using the DPAC PIN. Invite more than three (PM 4.5.2). ${(f.invites||[]).filter(v=>v.name&&v.email).length} of 4 listed.</p>
   ${(f.invites||[]).map((v,n)=>`<div class="cols inv">${fld(`Vendor ${n+1}`,`invites.${n}.name`,v.name,"text",'placeholder="Firm name"')}${fld("E-mail",`invites.${n}.email`,v.email,"email",'placeholder="sales@firm.com"')}<div class="f"><span>&nbsp;</span><button class="btn ghost danger" data-rminv="${n}">Remove</button></div></div>`).join("")}
   <div class="btns"><button class="btn" id="addInv">Add vendor</button></div><div class="cols">${fld("Closing date for bids","bidClose",f.bidClose,"date")}</div></fieldset>`:"")+
   (REQ.quotesSigned?`<div style="margin:10px 0">${cb("Every quotation signed on every page by all committee members","quotesSigned",f.quotesSigned)}</div>`:"")+
    `<p class="note">${REQ.bidClose?"After the DPAC opens the bids on Abhikalp, record each quotation here. ":"Record each quotation as received. "}Only quotations marked as meeting the specification and with a valid positive amount receive L1, L2, L3 ranks or a supplier recommendation. Check offered warranties against the period set in the specification.</p>`+
-  (f.quotes.length?f.quotes.map((q,n)=>`<div class="item"><div class="ih"><h3>Quotation ${n+1}${q.formalBid===false?" · Preliminary extract":""}</h3><button class="btn ghost danger" data-rm="${n}">Remove</button></div><div class="cols">${fld("Supplier",`quotes.${n}.vendor`,q.vendor)}${fld("Amount incl. taxes (₹)",`quotes.${n}.amount`,q.amount,"number")}${fld("Warranty offered (years)",`quotes.${n}.warrantyYears`,q.warrantyYears,"number",'step="0.5"',"Preparation check: record the vendor's offered period for comparison with this purchase's specification.")}${fld("Quotation date",`quotes.${n}.date`,q.date,"date")}</div>${cb("Formally opened bid (count for comparison)",`quotes.${n}.formalBid`,q.formalBid!==false)}${cb("Meets the specification",`quotes.${n}.meetsSpec`,q.meetsSpec)}${q.formalBid===false?'<p class="note">This cropped quotation is reference material. It is excluded from bid counts and financial ranking until formally opened and evaluated.</p>':""}</div>`).join(""):`<p class="empty">No quotations recorded yet.</p>`)+
+  (f.quotes.length?f.quotes.map((q,n)=>`<div class="item"><div class="ih"><h3>Quotation ${n+1}${q.formalBid!==true?" · Preliminary extract":""}</h3><button class="btn ghost danger" data-rm="${n}">Remove</button></div><div class="cols">${fld("Supplier",`quotes.${n}.vendor`,q.vendor)}${fld("Amount incl. taxes (₹)",`quotes.${n}.amount`,q.amount,"number")}${fld("Warranty offered (years)",`quotes.${n}.warrantyYears`,q.warrantyYears,"number",'step="0.5"',"Preparation check: record the vendor's offered period for comparison with this purchase's specification.")}${fld("Quotation date",`quotes.${n}.date`,q.date,"date")}</div>${cb("Formally opened bid (count for comparison)",`quotes.${n}.formalBid`,q.formalBid===true)}${cb("Meets the specification",`quotes.${n}.meetsSpec`,q.meetsSpec)}${q.formalBid!==true?'<p class="note">This cropped quotation is reference material. It is excluded from bid counts and financial ranking until formally opened and evaluated.</p>':""}</div>`).join(""):`<p class="empty">No quotations recorded yet.</p>`)+
   `<div class="btns"><button class="btn" id="addQ">Add quotation</button></div>`;
   bind(p);
   const ai=$("#addInv",p); if(ai) ai.onclick=()=>{ (f.invites=f.invites||[]).push({name:"",email:""}); save(); renderMain(); };
@@ -812,7 +814,7 @@ function panePortal(f,p){
   add("2. Department / Section", f.dept);
   add("DPAC Chairman", c.chair); add("DPAC Member 1", c.m1); add("DPAC Member 2", c.m2);
   sec("Purchase type");
-  add("3. Quotation attached", (f.quotes||[]).filter(q=>q.vendor).length?"Yes":"No", {note:t>L.noQuote&&!(f.quotes||[]).some(q=>q.vendor)?"Audit expects at least 3 quotations for this value.":""});
+  add("3. Quotation attached", (f.quotes||[]).some(formalQuote)?"Yes":"No", {note:t>L.noQuote&&!(f.quotes||[]).some(formalQuote)?"Audit expects at least 3 quotations for this value.":""});
   add("4. Type of material", [f.materialType==="CS"?"Consumable":"Non consumable", f.research?"Research Equipment":""].filter(Boolean).join(" + "), {plain:true, note:"Tick these boxes."});
   add("5. Purchase order type", "Normal", {plain:true});
   add("6. Proprietary mode", f.proprietary?"Yes":"No", {plain:true});
@@ -922,7 +924,7 @@ async function makeDocx(html){
   z.file("word/document.xml",H+`<w:document ${W}><w:body>${htmlToOoxml(html)}<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="708" w:footer="708" w:gutter="0"/></w:sectPr></w:body></w:document>`);
   return z.generateAsync({type:"blob",compression:"DEFLATE",mimeType:"application/vnd.openxmlformats-officedocument.wordprocessingml.document"});
 }
-const pdfSafe=t=>t.replace(/₹\s?/g,"Rs. ").replace(/→/g,"->").replace(/≥/g,">=").replace(/≤/g,"<=").replace(/[✓✔]/g,"(tick)").replace(/☐/g,"[  ]").replace(/☑/g,"[X]").replace(/[^\u0000-ɏ -⁯€]/g,"?");
+const pdfSafe=t=>t.replace(/₹\s?/g,"Rs. ").replace(/→/g,"->").replace(/≥/g,">=").replace(/≤/g,"<=").replace(/[✓✔]/g,"(tick)").replace(/☐/g,"[  ]").replace(/☑/g,"[X]").replace(/\u2126/g,"\u03A9").replace(/[^\u0000-ɏ\u0370-\u03FF -⁯€]/g,"?");
 function htmlToPdf(html){
   const root=document.createElement("div"); root.innerHTML=html;
   const inl=(node,f)=>{ const o=[]; node.childNodes.forEach(n=>{
@@ -1016,18 +1018,30 @@ $("#newBtn").onclick=()=>{ $("#app").classList.remove("open");  const id=uid()+D
 
 function saveIndentJson(id){ const f=files.get(id); if(!f) return; const base=(f.portalRef||f.title||"indent").replace(/[^\w-]+/g,"_"); saveBlob(`${base}.json`, new Blob([JSON.stringify({app:"Indent Desk",version:1,exported:new Date().toISOString(),files:{[id]:f}},null,1)],{type:"application/json"})); }
 $("#expBtn").onclick=()=>{ const d=new Date().toISOString().slice(0,10); saveBlob(`indent-desk-backup-${d}.json`, new Blob([JSON.stringify({app:"Indent Desk",version:1,exported:new Date().toISOString(),files:Object.fromEntries(files)},null,1)],{type:"application/json"})); };
+const SAFE_ID=/^[A-Za-z0-9_-]{1,80}$/;
+function normIndent(f){
+  if(!f||typeof f!=="object"||Array.isArray(f)||!Array.isArray(f.items)) return null;
+  const o=Object.assign(blankIndent(),f), obj=v=>v&&typeof v==="object"&&!Array.isArray(v);
+  for(const k of Object.keys(blankIndent())){ const d=blankIndent()[k]; if(Array.isArray(d)&&!Array.isArray(o[k])) o[k]=[]; else if(obj(d)) o[k]=Object.assign({},d,obj(o[k])?o[k]:{}); else if(typeof d==="string"&&o[k]!=null&&typeof o[k]!=="string") o[k]=String(o[k]); }
+  o.items=o.items.filter(obj).map(i=>Object.assign(blankItem(),i));
+  o.quotes=o.quotes.filter(obj).map(q=>Object.assign({vendor:"",amount:0,warrantyYears:"",date:"",formalBid:false,meetsSpec:false},q));
+  o.objections=o.objections.filter(x=>x!=null);
+  return o;
+}
 $("#impFile").onchange=async e=>{
   const file=e.target.files[0]; if(!file) return;
-  try{ const j=JSON.parse(await file.text()); const fs=j.files||(Array.isArray(j.items)?{[uid()+Date.now().toString(36)]:j}:j); let n=0;
-    for(const [id,f] of Object.entries(fs)){ if(f&&typeof f==="object"&&Array.isArray(f.items)){ files.set(id,Object.assign(blankIndent(),f)); n++; } }
-    persist(); if(!currentId&&files.size) currentId=[...files.keys()][0]; renderList(); renderMain();
+  try{ const j=JSON.parse(await file.text()); const fs=j.files||(Array.isArray(j.items)?{[uid()+Date.now().toString(36)]:j}:j); const got=[];
+    if(!fs||typeof fs!=="object") throw 0;
+    for(const [id,f] of Object.entries(fs)){ const o=normIndent(f); if(o) got.push([SAFE_ID.test(id)?id:uid()+Date.now().toString(36)+got.length,o]); }
+    if(!got.length) throw 0;
+    got.forEach(([id,o])=>files.set(id,o)); const n=got.length; persist(); if(!currentId&&files.size) currentId=[...files.keys()][0]; renderList(); renderMain();
     const b=$("#banner"); b.hidden=false; b.textContent=`Restored ${n} file${n===1?"":"s"} from ${file.name}.`;
   }catch{ const b=$("#banner"); b.hidden=false; b.textContent="That file is not an Indent Desk backup."; }
   e.target.value="";
 };
 (function(){
   let data=null; try{ data=JSON.parse(localStorage.getItem(KEY)||"null"); }catch{ data=null; const b=$("#banner"); b.hidden=false; b.textContent="This browser blocks local storage for files opened from disk. Your work will be lost on close unless you use Back up."; }
-  if(data) for(const [id,f] of Object.entries(data)) files.set(id,f);
+  if(data&&typeof data==="object") for(const [id,f] of Object.entries(data)){ const o=normIndent(f); if(o&&SAFE_ID.test(id)) files.set(id,o); }
   if(files.size) currentId=[...files.entries()].sort((a,b)=>(b[1].updatedAt||0)-(a[1].updatedAt||0))[0][0];
   const requested=new URLSearchParams(location.search).get("file");
   if(requested&&files.has(requested)) currentId=requested;
